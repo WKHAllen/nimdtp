@@ -1,5 +1,3 @@
-import ./nimdtp/client
-import ./nimdtp/server
+import ./nimdtp/[client, server]
 
-export
-  Client, Server
+export client, server

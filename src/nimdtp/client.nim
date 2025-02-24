@@ -1,4 +1,4 @@
-import std/[asyncfutures, asyncdispatch, asyncnet]
+import std/[asyncdispatch, asyncfutures, asyncnet]
 import ./[crypto, util]
 
 type
@@ -12,31 +12,33 @@ type
     onReceive: ClientOnReceive[R]
     onDisconnected: ClientOnDisconnected
 
-  ClientRef*[S, R] = ref ClientObj[S, R]
+  Client*[S, R] = ref ClientObj[S, R]
 
-proc newClient*[S, R](onReceive: ClientOnReceive[R] = nil, onDisconnected: ClientOnDisconnected = nil): ClientRef[S, R] =
+proc newClient*[S, R](onReceive: ClientOnReceive[R] = nil, onDisconnected: ClientOnDisconnected = nil): Client[S, R] =
   new(result)
   result.isConnected = false
   result.onReceive = onReceive
   result.onDisconnected = onDisconnected
 
-proc connect*[S, R](client: ClientRef[S, R], host: string, port: uint16) {.async.} =
+proc connect*[S, R](client: Client[S, R], host: string, port: uint16) {.async.} =
   if client.isConnected:
     raise newException(DTPError, "client is already connected to a server")
   let sock = newAsyncSocket()
+  sock.setSockOpt(OptReuseAddr, true)
+  sock.setSockOpt(OptReusePort, true)
   await sock.connect(host, port)
   client.sock = sock
   client.isConnected = true
-  await client.exchangeKeys()
+  client.key = await client.exchangeKeys()
   asyncCheck client.handle()
 
-proc disconnect*[S, R](client: ClientRef[S, R]) =
+proc disconnect*[S, R](client: Client[S, R]) =
   if not client.isConnected:
     raise newException(DTPError, "client is not connected to a server")
   client.isConnected = false
   client.sock.close()
 
-proc send*[S, R](client: ClientRef[S, R], data: S) {.async.} =
+proc send*[S, R](client: Client[S, R], data: S) {.async.} =
   if not client.isConnected:
     raise newException(DTPError, "client is not connected to a server")
   let dataSerialized = serialize(data)
@@ -45,20 +47,20 @@ proc send*[S, R](client: ClientRef[S, R], data: S) {.async.} =
   let buffer = size & dataSerialized
   await client.sock.send(buffer)
 
-proc connected*[S, R](client: ClientRef[S, R]): bool {.inline.} =
+proc connected*[S, R](client: Client[S, R]): bool {.inline.} =
   client.isConnected
 
-proc getAddr*[S, R](client: ClientRef[S, R]): (string, uint16) =
+proc getAddr*[S, R](client: Client[S, R]): (string, uint16) =
   if not client.isConnected:
     raise newException(DTPError, "client is not connected to a server")
   client.sock.getLocalAddr
 
-proc getServerAddr*[S, R](client: ClientRef[S, R]): (string, uint16) =
+proc getServerAddr*[S, R](client: Client[S, R]): (string, uint16) =
   if not client.isConnected:
     raise newException(DTPError, "client is not connected to a server")
   client.sock.getPeerAddr
 
-proc handle[S, R](client: ClientRef[S, R]) {.async.} =
+proc handle[S, R](client: Client[S, R]) {.async.} =
   try:
     while client.isConnected:
       let size = await client.sock.recv(lenSize)
@@ -75,7 +77,7 @@ proc handle[S, R](client: ClientRef[S, R]) {.async.} =
       client.sock.close()
       client.onDisconnected()
 
-proc exchangeKeys[S, R](client: ClientRef[S, R]) {.async.} =
+proc exchangeKeys[S, R](client: Client[S, R]): Future[array[aesKeySize, byte]] {.async.} =
   discard # TODO
 
 proc `=destroy`*[S, R](client: ClientObj[S, R]) =

@@ -4,9 +4,21 @@ import nimdtp/[client, server, util]
 proc `*`[N: SomeInteger](num: N): uint =
   uint(num)
 
-proc `*`[I](bytes: array[I, int]): array[I, byte] =
-  for index, value in bytes:
-    result[index] = byte(value)
+proc `*`[I](bytes: array[I, int]): string =
+  for value in bytes:
+    result.add($char(value))
+
+test "serialize and deserialize":
+  type
+    Foo = object
+      id: int
+      bar: string
+
+  let value = Foo(id: 1, bar: "baz")
+  let valueSerialized = serialize(value)
+  doAssert valueSerialized == """{"id": 1, "bar": "baz"}"""
+  let valueDeserialized = deserialize[Foo](valueSerialized)
+  doAssert valueDeserialized == value
 
 test "encode message size":
   doAssert encodeMessageSize(*0) == *[0, 0, 0, 0, 0]

@@ -1,12 +1,23 @@
+import std/marshal
+
 const lenSize* = 5
 
-proc encodeMessageSize*(size: uint): array[lenSize, byte] =
+type
+  DTPError* = object of CatchableError
+
+proc serialize*[T](data: T): string =
+  $$data
+
+proc deserialize*[T](dataSerialized: string): T =
+  to[T](dataSerialized)
+
+proc encodeMessageSize*(size: uint): string =
   var size = size # need to mutate size inside this proc but don't want to mutate the caller's variable
   for i in 0 ..< lenSize:
-    result[lenSize - i - 1] = byte(size and 0xff)
+    result.insert($char(size and 0xff), 0)
     size = size shr 8
 
-proc decodeMessageSize*(encodedSize: array[lenSize, byte]): uint =
+proc decodeMessageSize*(encodedSize: string): uint =
   for i in 0 ..< lenSize:
     result = result shl 8
     result += uint(encodedSize[i])

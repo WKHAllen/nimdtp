@@ -3,3 +3,5 @@ nimblecache/
 htmldocs/
 tests/*.exe
 todo.txt
+nimble.develop
+nimble.paths

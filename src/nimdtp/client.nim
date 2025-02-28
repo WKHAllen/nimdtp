@@ -8,13 +8,13 @@ type
   ClientObj[S, R] = object
     isConnected: bool
     sock: AsyncSocket
-    key: array[aesKeySize, byte]
+    key: AesKey
     onReceive: ClientOnReceive[S, R]
     onDisconnected: ClientOnDisconnected[S, R]
 
   Client*[S, R] = ref ClientObj[S, R]
 
-proc exchangeKeys[S, R](client: Client[S, R]): Future[array[aesKeySize, byte]] {.async.} =
+proc exchangeKeys[S, R](client: Client[S, R]): Future[AesKey] {.async.} =
   discard # TODO
 
 proc handle[S, R](client: Client[S, R]) {.async.} =
@@ -89,4 +89,5 @@ proc getServerAddr*[S, R](client: Client[S, R]): (string, uint16) =
   (address[0], address[1].uint16)
 
 proc `=destroy`*[S, R](client: ClientObj[S, R]) =
-  client.sock.close()
+  if client.sock != nil and not client.sock.isClosed:
+    client.sock.close()

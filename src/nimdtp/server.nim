@@ -8,7 +8,7 @@ type
 
   ClientRepr = object
     conn: AsyncSocket
-    key: array[aesKeySize, byte]
+    key: AesKey
 
   ServerObj[S, R] = object
     isServing: bool
@@ -21,7 +21,7 @@ type
 
   Server*[S, R] = ref ServerObj[S, R]
 
-proc exchangeKeys[S, R](server: Server[S, R], clientId: int, conn: AsyncSocket): Future[array[aesKeySize, byte]] {.async.} =
+proc exchangeKeys[S, R](server: Server[S, R], clientId: int, conn: AsyncSocket): Future[AesKey] {.async.} =
   discard # TODO
 
 proc newClientId[S, R](server: Server[S, R]): int =
@@ -133,5 +133,7 @@ proc removeClient*[S, R](server: Server[S, R], clientId: int) =
 
 proc `=destroy`*[S, R](server: ServerObj[S, R]) =
   for client in server.clients.values:
-    client.conn.close()
-  server.sock.close()
+    if client.conn != nil and not client.conn.isClosed:
+      client.conn.close()
+  if server.sock != nil and not server.sock.isClosed:
+    server.sock.close()

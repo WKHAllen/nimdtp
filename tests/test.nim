@@ -1,6 +1,6 @@
 import std/[asyncdispatch, random, tables]
 import unittest
-import nimdtp/[client, server, util]
+import nimdtp/[client, server, crypto, util]
 
 randomize()
 
@@ -74,7 +74,32 @@ test "decode message size":
   doAssert decodeMessageSize(*[255, 255, 255, 255, 255]) == 1099511627775
 
 test "crypto":
-  discard # TODO
+  let rsaMessage = "Hello, RSA!"
+  let (publicKey, privateKey) = newRsaKeyPair()
+  let rsaEncrypted = rsaEncrypt(publicKey, rsaMessage)
+  let rsaDecrypted = rsaDecrypt(privateKey, rsaEncrypted)
+  echo "Original string:  " & rsaMessage
+  echo "Encrypted string: " & rsaEncrypted
+  echo "Decrypted string: " & rsaDecrypted
+  doAssert rsaDecrypted == rsaMessage
+  doAssert rsaEncrypted != rsaMessage
+
+  let aesMessage = "Hello, AES!"
+  let key = newAesKey()
+  let aesEncrypted = aesEncrypt(key, aesMessage)
+  let aesDecrypted = aesDecrypt(key, aesEncrypted)
+  echo "Original string:  " & aesMessage
+  echo "Encrypted string: " & aesEncrypted
+  echo "Decrypted string: " & aesDecrypted
+  doAssert aesDecrypted == aesMessage
+  doAssert aesEncrypted != aesMessage
+
+  let (publicKey2, privateKey2) = newRsaKeyPair()
+  let key2 = newAesKey()
+  let encryptedKey = rsaEncrypt(publicKey2, $key2)
+  let decryptedKey = rsaDecrypt(privateKey2, encryptedKey).toAesKey
+  doAssert $key2 == $decryptedKey
+  doAssert $key2 != encryptedKey
 
 test "server serving":
   let expected = newExpectMap()

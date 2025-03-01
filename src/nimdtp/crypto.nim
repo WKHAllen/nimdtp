@@ -1,3 +1,5 @@
+# import std/[asyncdispatch, asyncfutures, typedthreads]
+
 # "/*TYPESECTION*/": https://web.mit.edu/nim-lang_v0.16.0/nim-0.16.0/doc/manual/pragmas.txt
 {.emit: """/*TYPESECTION*/
 /**
@@ -862,7 +864,7 @@ proc toAesKey*(s: string): AesKey =
   let key = aes_key_from(cstring(s), csize_t(s.len))
   result = AesKey(key: key)
 
-proc newRsaKeyPair*(): (RsaPublicKey, RsaPrivateKey) =
+proc newRsaKeyPairSync*(): (RsaPublicKey, RsaPrivateKey) =
   let keys = rsa_key_pair_new()
   if keys == nil:
     raise newException(OpenSSLError, "Failed generating RSA key pair, OpenSSL error: " & $get_openssl_error())
@@ -871,7 +873,7 @@ proc newRsaKeyPair*(): (RsaPublicKey, RsaPrivateKey) =
   result = (publicKey, privateKey)
   rsa_key_pair_free_wrapper(keys)
 
-proc rsaEncrypt*(publicKey: RsaPublicKey, plaintext: string): string =
+proc rsaEncryptSync*(publicKey: RsaPublicKey, plaintext: string): string =
   let key = cast[ptr rsa_public_key_t](publicKey.key)
   let ciphertext = rsa_encrypt(key, addr plaintext[0], csize_t(plaintext.len))
   if ciphertext == nil:
@@ -881,7 +883,7 @@ proc rsaEncrypt*(publicKey: RsaPublicKey, plaintext: string): string =
   result = ciphertextStr
   crypto_data_free(ciphertext)
 
-proc rsaDecrypt*(privateKey: RsaPrivateKey, ciphertext: string): string =
+proc rsaDecryptSync*(privateKey: RsaPrivateKey, ciphertext: string): string =
   let key = cast[ptr rsa_private_key_t](privateKey.key)
   let plaintext = rsa_decrypt(key, addr ciphertext[0], csize_t(ciphertext.len))
   if plaintext == nil:
@@ -891,13 +893,13 @@ proc rsaDecrypt*(privateKey: RsaPrivateKey, ciphertext: string): string =
   result = plaintextStr
   crypto_data_free(plaintext)
 
-proc newAesKey*(): AesKey =
+proc newAesKeySync*(): AesKey =
   let key = aes_key_new()
   if key == nil:
     raise newException(OpenSSLError, "Failed generating AES key, OpenSSL error: " & $get_openssl_error())
   result = AesKey(key: key)
 
-proc aesEncrypt*(key: AesKey, plaintext: string): string =
+proc aesEncryptSync*(key: AesKey, plaintext: string): string =
   let key = cast[ptr aes_key_t](key.key)
   let ciphertext = aes_encrypt(key, addr plaintext[0], csize_t(plaintext.len))
   if ciphertext == nil:
@@ -907,7 +909,7 @@ proc aesEncrypt*(key: AesKey, plaintext: string): string =
   result = ciphertextStr
   crypto_data_free(ciphertext)
 
-proc aesDecrypt*(key: AesKey, ciphertext: string): string =
+proc aesDecryptSync*(key: AesKey, ciphertext: string): string =
   let key = cast[ptr aes_key_t](key.key)
   let plaintext = aes_decrypt(key, addr ciphertext[0], csize_t(ciphertext.len))
   if plaintext == nil:
@@ -916,3 +918,98 @@ proc aesDecrypt*(key: AesKey, ciphertext: string): string =
   copyMem(addr plaintextStr[0], plaintext.data, plaintext.data_size)
   result = plaintextStr
   crypto_data_free(plaintext)
+
+# I wish this worked. The idea is to wrap the heavily synchronous crypto
+# operations in futures to make them asynchronous. Under the hood, this means
+# spawning the crypto operation in a new thread and instructing the future to
+# complete or fail once the operation completes or fails. This way, the CPU
+# operations don't block the thread running the async I/O operations.
+# Unfortunately, this fails at a seemingly random point each time, with no
+# stacktrace. It could be that the future needs to be accessed via a lock to
+# ensure it isn't polled at the same moment that it completes/fails. But for the
+# moment, I'm going to simply use the synchronous version, since most operations
+# are very fast, and since I'm not interested in spending anymore time debugging
+# this at the moment. I've already spent countless hours getting these crypto
+# utilities working.
+
+# proc newRsaKeyPairWrapper(fut: Future[(RsaPublicKey, RsaPrivateKey)]) =
+#   try:
+#     let value = newRsaKeyPairSync()
+#     fut.complete(value)
+#   except OpenSSLError as err:
+#     fut.fail(err)
+
+# proc rsaEncryptWrapper(args: tuple[fut: Future[string], publicKey: RsaPublicKey, plaintext: string]) =
+#   let (fut, publicKey, plaintext) = args
+#   try:
+#     let value = rsaEncryptSync(publicKey, plaintext)
+#     fut.complete(value)
+#   except OpenSSLError as err:
+#     fut.fail(err)
+
+# proc rsaDecryptWrapper(args: tuple[fut: Future[string], privateKey: RsaPrivateKey, ciphertext: string]) =
+#   let (fut, privateKey, ciphertext) = args
+#   try:
+#     let value = rsaDecryptSync(privateKey, ciphertext)
+#     fut.complete(value)
+#   except OpenSSLError as err:
+#     fut.fail(err)
+
+# proc newAesKeyWrapper(fut: Future[AesKey]) =
+#   try:
+#     let value = newAesKeySync()
+#     fut.complete(value)
+#   except OpenSSLError as err:
+#     fut.fail(err)
+
+# proc aesEncryptWrapper(args: tuple[fut: Future[string], key: AesKey, plaintext: string]) =
+#   let (fut, key, plaintext) = args
+#   try:
+#     let value = aesEncryptSync(key, plaintext)
+#     fut.complete(value)
+#   except OpenSSLError as err:
+#     fut.fail(err)
+
+# proc aesDecryptWrapper(args: tuple[fut: Future[string], key: AesKey, ciphertext: string]) =
+#   let (fut, key, ciphertext) = args
+#   try:
+#     let value = aesDecryptSync(key, ciphertext)
+#     fut.complete(value)
+#   except OpenSSLError as err:
+#     fut.fail(err)
+
+# proc newRsaKeyPair*(): Future[(RsaPublicKey, RsaPrivateKey)] =
+#   asyncCheck sleepAsync(10000)
+#   result = newFuture[(RsaPublicKey, RsaPrivateKey)]("nimdtp.crypto.newRsaKeyPair")
+#   var thread: Thread[Future[(RsaPublicKey, RsaPrivateKey)]]
+#   createThread(thread, newRsaKeyPairWrapper, result)
+
+# proc rsaEncrypt*(publicKey: RsaPublicKey, plaintext: string): Future[string] =
+#   asyncCheck sleepAsync(10000)
+#   result = newFuture[string]("nimdtp.crypto.rsaEncrypt")
+#   var thread: Thread[tuple[fut: Future[string], publicKey: RsaPublicKey, plaintext: string]]
+#   createThread(thread, rsaEncryptWrapper, (result, publicKey, plaintext))
+
+# proc rsaDecrypt*(privateKey: RsaPrivateKey, ciphertext: string): Future[string] =
+#   asyncCheck sleepAsync(10000)
+#   result = newFuture[string]("nimdtp.crypto.rsaDecrypt")
+#   var thread: Thread[tuple[fut: Future[string], privateKey: RsaPrivateKey, ciphertext: string]]
+#   createThread(thread, rsaDecryptWrapper, (result, privateKey, ciphertext))
+
+# proc newAesKey*(): Future[AesKey] =
+#   asyncCheck sleepAsync(10000)
+#   result = newFuture[AesKey]("nimdtp.crypto.newAesKey")
+#   var thread: Thread[Future[AesKey]]
+#   createThread(thread, newAesKeyWrapper, result)
+
+# proc aesEncrypt*(key: AesKey, plaintext: string): Future[string] =
+#   asyncCheck sleepAsync(10000)
+#   result = newFuture[string]("nimdtp.crypto.aesEncrypt")
+#   var thread: Thread[tuple[fut: Future[string], key: AesKey, plaintext: string]]
+#   createThread(thread, aesEncryptWrapper, (result, key, plaintext))
+
+# proc aesDecrypt*(key: AesKey, ciphertext: string): Future[string] =
+#   asyncCheck sleepAsync(10000)
+#   result = newFuture[string]("nimdtp.crypto.aesDecrypt")
+#   var thread: Thread[tuple[fut: Future[string], key: AesKey, ciphertext: string]]
+#   createThread(thread, aesDecryptWrapper, (result, key, ciphertext))

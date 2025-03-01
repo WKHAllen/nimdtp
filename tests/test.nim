@@ -1,4 +1,4 @@
-import std/[asyncdispatch, random, tables]
+import std/[asyncdispatch, random, tables, times]
 import unittest
 import nimdtp/[client, server, crypto, util]
 
@@ -10,6 +10,11 @@ const sleepTime = 100
 
 template sleep() =
   waitFor sleepAsync(sleepTime)
+
+template time(name: static[string], body: untyped): untyped =
+  let t = cpuTime()
+  body
+  echo "Time taken for ", name, ": ", cpuTime() - t
 
 type
   ExpectMap = ref object
@@ -75,9 +80,12 @@ test "decode message size":
 
 test "crypto":
   let rsaMessage = "Hello, RSA!"
-  let (publicKey, privateKey) = newRsaKeyPair()
-  let rsaEncrypted = rsaEncrypt(publicKey, rsaMessage)
-  let rsaDecrypted = rsaDecrypt(privateKey, rsaEncrypted)
+  time "new RSA key pair":
+    let (publicKey, privateKey) = newRsaKeyPairSync()
+  time "RSA encrypt":
+    let rsaEncrypted = rsaEncryptSync(publicKey, rsaMessage)
+  time "RSA decrypt":
+    let rsaDecrypted = rsaDecryptSync(privateKey, rsaEncrypted)
   echo "Original string:  " & rsaMessage
   echo "Encrypted string: " & rsaEncrypted
   echo "Decrypted string: " & rsaDecrypted
@@ -85,21 +93,74 @@ test "crypto":
   doAssert rsaEncrypted != rsaMessage
 
   let aesMessage = "Hello, AES!"
-  let key = newAesKey()
-  let aesEncrypted = aesEncrypt(key, aesMessage)
-  let aesDecrypted = aesDecrypt(key, aesEncrypted)
+  time "new AES key":
+    let key = newAesKeySync()
+  time "AES encrypt":
+    let aesEncrypted = aesEncryptSync(key, aesMessage)
+  time "AES decrypt":
+    let aesDecrypted = aesDecryptSync(key, aesEncrypted)
   echo "Original string:  " & aesMessage
   echo "Encrypted string: " & aesEncrypted
   echo "Decrypted string: " & aesDecrypted
   doAssert aesDecrypted == aesMessage
   doAssert aesEncrypted != aesMessage
 
-  let (publicKey2, privateKey2) = newRsaKeyPair()
-  let key2 = newAesKey()
-  let encryptedKey = rsaEncrypt(publicKey2, $key2)
-  let decryptedKey = rsaDecrypt(privateKey2, encryptedKey).toAesKey
+  time "new RSA key pair for encrypting AES key":
+    let (publicKey2, privateKey2) = newRsaKeyPairSync()
+  time "new AES key for being RSA encrypted":
+    let key2 = newAesKeySync()
+  time "encrypting AES key with RSA":
+    let encryptedKey = rsaEncryptSync(publicKey2, $key2)
+  time "decrypting AES key with RSA":
+    let decryptedKey = rsaDecryptSync(privateKey2, encryptedKey).toAesKey
   doAssert $key2 == $decryptedKey
   doAssert $key2 != encryptedKey
+
+  proc generateLargeMessage(size: int): seq[char] =
+    result = newSeq[char](size)
+    for i in 0..<size:
+      result[i] = rand(char)
+
+  proc toString(str: seq[char]): string =
+    result = newStringOfCap(len(str))
+    for ch in str:
+      add(result, ch)
+
+  let largeMessage = generateLargeMessage(65536).toString
+
+  time "AES encrypt large message":
+    let thing = aesEncryptSync(key2, largeMessage)
+  echo "Encrypted long str len: ", thing.len
+
+  # let rsaMessage = "Hello, RSA!"
+  # echo "gen keys"
+  # let (publicKey, privateKey) = waitFor newRsaKeyPair()
+  # echo "encrypt"
+  # let rsaEncrypted = waitFor rsaEncrypt(publicKey, rsaMessage)
+  # echo "decrypt"
+  # let rsaDecrypted = waitFor rsaDecrypt(privateKey, rsaEncrypted)
+  # echo "Original string:  " & rsaMessage
+  # echo "Encrypted string: " & rsaEncrypted
+  # echo "Decrypted string: " & rsaDecrypted
+  # doAssert rsaDecrypted == rsaMessage
+  # doAssert rsaEncrypted != rsaMessage
+
+  # let aesMessage = "Hello, AES!"
+  # let key = waitFor newAesKey()
+  # let aesEncrypted = waitFor aesEncrypt(key, aesMessage)
+  # let aesDecrypted = waitFor aesDecrypt(key, aesEncrypted)
+  # echo "Original string:  " & aesMessage
+  # echo "Encrypted string: " & aesEncrypted
+  # echo "Decrypted string: " & aesDecrypted
+  # doAssert aesDecrypted == aesMessage
+  # doAssert aesEncrypted != aesMessage
+
+  # let (publicKey2, privateKey2) = waitFor newRsaKeyPair()
+  # let key2 = waitFor newAesKey()
+  # let encryptedKey = waitFor rsaEncrypt(publicKey2, $key2)
+  # let decryptedKey = waitFor(rsaDecrypt(privateKey2, encryptedKey)).toAesKey
+  # doAssert $key2 == $decryptedKey
+  # doAssert $key2 != encryptedKey
 
 test "server serving":
   let expected = newExpectMap()

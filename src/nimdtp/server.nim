@@ -26,7 +26,7 @@ proc exchangeKeys[S, R](server: Server[S, R], clientId: int, conn: AsyncSocket):
 
 proc newClientId[S, R](server: Server[S, R]): int =
   result = server.nextClientId
-  server.nextClientId += 1
+  inc server.nextClientId
 
 proc serveClient[S, R](server: Server[S, R], clientId: int) {.async.} =
   if server.onConnect != nil:

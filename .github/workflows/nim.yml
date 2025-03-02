@@ -21,7 +21,7 @@ jobs:
         run: nimble install -y
 
       - name: Test
-        run: nimble test
+        run: make test
 
       - name: Check
-        run: nimble check
+        run: make check

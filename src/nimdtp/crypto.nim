@@ -9,10 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef OPENSSL_CORE_H
-
-// Probably the headers aren't available, so we'll declare what we use.
-
 #define BIO void
 #define BIO_METHOD void
 #define EVP_PKEY void
@@ -81,8 +77,6 @@ extern unsigned long ERR_get_error(void);
     EVP_PKEY_Q_keygen(NULL, NULL, "RSA", (size_t)(0 + (bits)))
 #define EVP_SealUpdate(a, b, c, d, e) EVP_EncryptUpdate(a, b, c, d, e)
 #define EVP_OpenUpdate(a, b, c, d, e) EVP_DecryptUpdate(a, b, c, d, e)
-
-#endif /* OPENSSL_CORE_H */
 
 // The length of the size portion of a message.
 #define LENSIZE 5

@@ -15,7 +15,17 @@ type
   Client*[S, R] = ref ClientObj[S, R]
 
 proc exchangeKeys[S, R](client: Client[S, R]): Future[AesKey] {.async.} =
-  discard # TODO
+  let size = await client.sock.recv(lenSize)
+  let publicKeySize = decodeMessageSize(size)
+  let publicKeyBuffer = await client.sock.recv(publicKeySize)
+  let publicKey = publicKeyBuffer.toRsaPublicKey
+  let key = newAesKeySync()
+  let keyStr = $key
+  let encryptedKey = rsaEncryptSync(publicKey, keyStr)
+  let encryptedKeySize = encodeMessageSize(encryptedKey.len)
+  let encryptedKeyBuffer = encryptedKeySize & encryptedKey
+  await client.sock.send(encryptedKeyBuffer)
+  result = key
 
 proc handle[S, R](client: Client[S, R]) {.async.} =
   try:
@@ -24,11 +34,11 @@ proc handle[S, R](client: Client[S, R]) {.async.} =
       if size.len != lenSize:
         break
       let msgSize = decodeMessageSize(size)
-      let buffer = await client.sock.recv(int(msgSize))
-      if buffer.len != int(msgSize):
+      let buffer = await client.sock.recv(msgSize)
+      if buffer.len != msgSize:
         break
-      # TODO: decrypt data
-      let data = deserialize[R](buffer)
+      let bufferDecrypted = aesDecryptSync(client.key, buffer)
+      let data = deserialize[R](bufferDecrypted)
       if client.onReceive != nil:
         client.onReceive(client, data)
   except CatchableError:
@@ -68,9 +78,9 @@ proc send*[S, R](client: Client[S, R], data: S) {.async.} =
   if not client.isConnected:
     raise newException(DTPError, "client is not connected to a server")
   let dataSerialized = serialize(data)
-  # TODO: encrypt data
-  let size = encodeMessageSize(dataSerialized.len)
-  let buffer = size & dataSerialized
+  let dataEncrypted = aesEncryptSync(client.key, dataSerialized)
+  let size = encodeMessageSize(dataEncrypted.len)
+  let buffer = size & dataEncrypted
   await client.sock.send(buffer)
 
 proc connected*[S, R](client: Client[S, R]): bool {.inline.} =
@@ -90,4 +100,7 @@ proc getServerAddr*[S, R](client: Client[S, R]): (string, uint16) =
 
 proc `=destroy`*[S, R](client: ClientObj[S, R]) =
   if client.sock != nil and not client.sock.isClosed:
-    client.sock.close()
+    try:
+      client.sock.close()
+    except CatchableError, Defect:
+      discard

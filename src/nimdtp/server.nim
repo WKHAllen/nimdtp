@@ -22,7 +22,16 @@ type
   Server*[S, R] = ref ServerObj[S, R]
 
 proc exchangeKeys[S, R](server: Server[S, R], clientId: int, conn: AsyncSocket): Future[AesKey] {.async.} =
-  discard # TODO
+  let (publicKey, privateKey) = newRsaKeyPairSync()
+  let publicKeyStr = $publicKey
+  let publicKeySize = encodeMessageSize(publicKeyStr.len)
+  let publicKeyBuffer = publicKeySize & publicKeyStr
+  await conn.send(publicKeyBuffer)
+  let size = await conn.recv(lenSize)
+  let keySize = decodeMessageSize(size)
+  let keyBuffer = await conn.recv(keySize)
+  let decryptedKeyBuffer = rsaDecryptSync(privateKey, keyBuffer)
+  result = decryptedKeyBuffer.toAesKey
 
 proc newClientId[S, R](server: Server[S, R]): int =
   result = server.nextClientId
@@ -41,11 +50,11 @@ proc serveClient[S, R](server: Server[S, R], clientId: int) {.async.} =
       if size.len != lenSize:
         break
       let msgSize = decodeMessageSize(size)
-      let buffer = await client.conn.recv(int(msgSize))
-      if buffer.len != int(msgSize):
+      let buffer = await client.conn.recv(msgSize)
+      if buffer.len != msgSize:
         break
-      # TODO: decrypt data
-      let data = deserialize[R](buffer)
+      let bufferDecrypted = aesDecryptSync(client.key, buffer)
+      let data = deserialize[R](bufferDecrypted)
       if server.onReceive != nil:
         server.onReceive(server, clientId, data)
   except CatchableError:
@@ -98,9 +107,9 @@ proc send*[S, R](server: Server[S, R], clientIds: seq[int], data: S) {.async.} =
   let dataSerialized = serialize(data)
   for clientId in clientIds:
     let client = server.clients[clientId]
-    # TODO: encrypt data
-    let size = encodeMessageSize(dataSerialized.len)
-    let buffer = size & dataSerialized
+    let dataEncrypted = aesEncryptSync(client.key, dataSerialized)
+    let size = encodeMessageSize(dataEncrypted.len)
+    let buffer = size & dataEncrypted
     await client.conn.send(buffer)
 
 proc send*[S, R](server: Server[S, R], clientId: int, data: S) {.async.} =
@@ -134,6 +143,12 @@ proc removeClient*[S, R](server: Server[S, R], clientId: int) =
 proc `=destroy`*[S, R](server: ServerObj[S, R]) =
   for client in server.clients.values:
     if client.conn != nil and not client.conn.isClosed:
-      client.conn.close()
+      try:
+        client.conn.close()
+      except CatchableError, Defect:
+        discard
   if server.sock != nil and not server.sock.isClosed:
-    server.sock.close()
+    try:
+      server.sock.close()
+    except CatchableError, Defect:
+      discard

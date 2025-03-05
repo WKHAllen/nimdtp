@@ -3,14 +3,17 @@ import ./[crypto, util]
 
 type
   ServerOnReceive[S, R] = proc (server: Server[S, R], clientId: int, data: R) {.closure.}
+    ## A procedure handling data received from a client.
   ServerOnConnect[S, R] = proc (server: Server[S, R], clientId: int) {.closure.}
+    ## A procedure which runs each time a new client connects.
   ServerOnDisconnect[S, R] = proc (server: Server[S, R], clientId: int) {.closure.}
+    ## A procedure which runs each time a client disconnects.
 
-  ClientRepr = object
+  ClientRepr = object ## A representation of a connected client.
     conn: AsyncSocket
     key: AesKey
 
-  ServerObj[S, R] = object
+  ServerObj[S, R] = object ## A network server object.
     isServing: bool
     sock: AsyncSocket
     clients: Table[int, ClientRepr]
@@ -19,9 +22,10 @@ type
     onConnect: ServerOnConnect[S, R]
     onDisconnect: ServerOnDisconnect[S, R]
 
-  Server*[S, R] = ref ServerObj[S, R]
+  Server*[S, R] = ref ServerObj[S, R] ## A network server.
 
-proc exchangeKeys[S, R](server: Server[S, R], clientId: int, conn: AsyncSocket): Future[AesKey] {.async.} =
+proc exchangeKeys[S, R](server: Server[S, R], clientId: int, conn: AsyncSocket): Future[AesKey] {.warning[BareExcept]: off, async.} =
+  ## Performs a cryptographic key exchange with a connecting client.
   let (publicKey, privateKey) = newRsaKeyPairSync()
   let publicKeyStr = $publicKey
   let publicKeySize = encodeMessageSize(publicKeyStr.len)
@@ -34,10 +38,12 @@ proc exchangeKeys[S, R](server: Server[S, R], clientId: int, conn: AsyncSocket):
   result = decryptedKeyBuffer.toAesKey
 
 proc newClientId[S, R](server: Server[S, R]): int =
+  ## Returns the next available client ID.
   result = server.nextClientId
   inc server.nextClientId
 
-proc serveClient[S, R](server: Server[S, R], clientId: int) {.async.} =
+proc serveClient[S, R](server: Server[S, R], clientId: int) {.warning[BareExcept]: off, async.} =
+  ## Event loop for a single connected client.
   if server.onConnect != nil:
     server.onConnect(server, clientId)
   defer:
@@ -61,7 +67,8 @@ proc serveClient[S, R](server: Server[S, R], clientId: int) {.async.} =
     if server.isServing and server.clients.hasKey(clientId):
       server.removeClient(clientId)
 
-proc serve[S, R](server: Server[S, R]) {.async.} =
+proc serve[S, R](server: Server[S, R]) {.warning[BareExcept]: off, async.} =
+  ## Event loop for the server listener.
   while server.isServing:
     try:
       let conn = await server.sock.accept()
@@ -73,6 +80,7 @@ proc serve[S, R](server: Server[S, R]) {.async.} =
       discard # this handles the case where an error is thrown because the server has been stopped, and ignores all other errors
 
 proc newServer*[S, R](onReceive: ServerOnReceive[S, R] = nil, onConnect: ServerOnConnect[S, R] = nil, onDisconnect: ServerOnDisconnect[S, R] = nil): Server[S, R] =
+  ## Constructs a new network server.
   new(result)
   result.isServing = false
   result.clients = initTable[int, ClientRepr]()
@@ -81,7 +89,8 @@ proc newServer*[S, R](onReceive: ServerOnReceive[S, R] = nil, onConnect: ServerO
   result.onConnect = onConnect
   result.onDisconnect = onDisconnect
 
-proc start*[S, R](server: Server[S, R], host: string, port: uint16) {.async.} =
+proc start*[S, R](server: Server[S, R], host: string, port: uint16) {.warning[BareExcept]: off, async.} =
+  ## Starts the server listening on the given host and port.
   if server.isServing:
     raise newException(DTPError, "server is already serving")
   let sock = newAsyncSocket()
@@ -94,6 +103,7 @@ proc start*[S, R](server: Server[S, R], host: string, port: uint16) {.async.} =
   asyncCheck server.serve()
 
 proc stop*[S, R](server: Server[S, R]) =
+  ## Stops the server, disconnecting all clients in the process.
   if not server.isServing:
     raise newException(DTPError, "server is not serving")
   server.isServing = false
@@ -101,7 +111,8 @@ proc stop*[S, R](server: Server[S, R]) =
     client.conn.close()
   server.sock.close()
 
-proc send*[S, R](server: Server[S, R], clientIds: seq[int], data: S) {.async.} =
+proc send*[S, R](server: Server[S, R], clientIds: seq[int], data: S) {.warning[BareExcept]: off, async.} =
+  ## Sends data to a list of clients.
   if not server.isServing:
     raise newException(DTPError, "server is not serving")
   let dataSerialized = serialize(data)
@@ -112,28 +123,34 @@ proc send*[S, R](server: Server[S, R], clientIds: seq[int], data: S) {.async.} =
     let buffer = size & dataEncrypted
     await client.conn.send(buffer)
 
-proc send*[S, R](server: Server[S, R], clientId: int, data: S) {.async.} =
+proc send*[S, R](server: Server[S, R], clientId: int, data: S) {.warning[BareExcept]: off, async.} =
+  ## Sends data to a single client.
   await server.send(@[clientId], data)
 
-proc sendAll*[S, R](server: Server[S, R], data: S) {.async.} =
+proc sendAll*[S, R](server: Server[S, R], data: S) {.warning[BareExcept]: off, async.} =
+  ## Sends data to all connected clients.
   await server.send(toSeq(server.clients.keys), data)
 
 proc serving*[S, R](server: Server[S, R]): bool {.inline.} =
+  ## Is the server currently serving?
   server.isServing
 
 proc getAddr*[S, R](server: Server[S, R]): (string, uint16) =
+  ## Returns the server's address.
   if not server.isServing:
     raise newException(DTPError, "server is not serving")
   let address = server.sock.getLocalAddr()
   (address[0], address[1].uint16)
 
 proc getClientAddr*[S, R](server: Server[S, R], clientId: int): (string, uint16) =
+  ## Returns a client's address.
   if not server.isServing:
     raise newException(DTPError, "server is not serving")
   let address = server.clients[clientId].conn.getPeerAddr()
   (address[0], address[1].uint16)
 
 proc removeClient*[S, R](server: Server[S, R], clientId: int) =
+  ## Disconnects a client from the server.
   if not server.isServing:
     raise newException(DTPError, "server is not serving")
   let client = server.clients[clientId]
@@ -141,14 +158,18 @@ proc removeClient*[S, R](server: Server[S, R], clientId: int) =
   server.clients.del(clientId)
 
 proc `=destroy`*[S, R](server: ServerObj[S, R]) =
+  ## Attempts to shut down the server and disconnect all clients if still
+  ## serving when the server object is dropped.
   for client in server.clients.values:
     if client.conn != nil and not client.conn.isClosed:
       try:
-        client.conn.close()
+        {.warning[Effect]: off.}:
+          client.conn.close()
       except CatchableError, Defect:
         discard
   if server.sock != nil and not server.sock.isClosed:
     try:
-      server.sock.close()
+      {.warning[Effect]: off.}:
+        server.sock.close()
     except CatchableError, Defect:
       discard

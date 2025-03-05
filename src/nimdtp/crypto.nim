@@ -1,5 +1,9 @@
 # import std/[asyncdispatch, asyncfutures, typedthreads]
 
+###############################################
+# C wrapper around relevant OpenSSL functions #
+###############################################
+
 # "/*TYPESECTION*/": https://web.mit.edu/nim-lang_v0.16.0/nim-0.16.0/doc/manual/pragmas.txt
 {.emit: """/*TYPESECTION*/
 /**
@@ -826,6 +830,10 @@ N_CDECL(unsigned long, get_openssl_error)(void)
 }
 """.}
 
+############################################################
+# Nim Foreign Function Interface for the C OpenSSL wrapper #
+############################################################
+
 type
   crypto_data_t {.importc: "crypto_data_t".} = object
     data: pointer
@@ -868,65 +876,79 @@ proc aes_encrypt(key: ptr aes_key_t, plaintext: pointer, plaintext_size: csize_t
 proc aes_decrypt(key: ptr aes_key_t, ciphertext: pointer, ciphertext_size: csize_t): ptr crypto_data_t {.cdecl, importc.}
 proc get_openssl_error(): culong {.cdecl, importc.}
 
+############################################################
+# High level wrapper around the Foreign Function Interface #
+############################################################
+
 type
-  OpenSSLError = object of CatchableError
+  OpenSSLError = object of CatchableError ## An error thrown by OpenSSL.
     errorCode: uint
 
-  RsaPublicKeyObj = object
+  RsaPublicKeyObj = object ## An RSA public key object.
     key: pointer
 
-  RsaPublicKey* = ref RsaPublicKeyObj
+  RsaPublicKey* = ref RsaPublicKeyObj ## An RSA public key.
 
-  RsaPrivateKeyObj = object
+  RsaPrivateKeyObj = object ## An RSA private key object.
     key: pointer
 
-  RsaPrivateKey* = ref RsaPrivateKeyObj
+  RsaPrivateKey* = ref RsaPrivateKeyObj ## An RSA private key.
 
-  AesKeyObj = object
+  AesKeyObj = object ## An AES key object.
     key: pointer
 
-  AesKey* = ref AesKeyObj
+  AesKey* = ref AesKeyObj ## An AES key.
 
 proc `=destroy`*(publicKey: RsaPublicKeyObj) =
+  ## Frees the heap memory used by an RSA public key.
   let key = cast[ptr rsa_public_key_t](publicKey.key)
   rsa_public_key_free(key)
 
 proc `=destroy`*(privateKey: RsaPrivateKeyObj) =
+  ## Frees the heap memory used by an RSA private key.
   let key = cast[ptr rsa_private_key_t](privateKey.key)
   rsa_private_key_free(key)
 
 proc `=destroy`*(key: AesKeyObj) =
+  ## Frees the heap memory used by an AES key.
   let key = cast[ptr aes_key_t](key.key)
   aes_key_free(key)
 
 proc `$`*(publicKey: RsaPublicKey): string =
+  ## Returns a string representation of an RSA public key.
   let key = cast[ptr rsa_public_key_t](publicKey.key)
   result = newString(key.key_size)
   copyMem(addr result[0], key.key, key.key_size)
 
 proc `$`*(privateKey: RsaPrivateKey): string =
+  ## Returns a string representation of an RSA private key.
   let key = cast[ptr rsa_private_key_t](privateKey.key)
   result = newString(key.key_size)
   copyMem(addr result[0], key.key, key.key_size)
 
 proc `$`*(key: AesKey): string =
+  ## Returns a string representation of an AES key.
   let key = cast[ptr aes_key_t](key.key)
   result = newString(key.key_size)
   copyMem(addr result[0], key.key, key.key_size)
 
 proc toRsaPublicKey*(s: string): RsaPublicKey =
+  ## Constructs an RSA public key from its string representation.
   let publicKey = rsa_public_key_from_bytes(cstring(s), csize_t(s.len))
   result = RsaPublicKey(key: publicKey)
 
 proc toRsaPrivateKey*(s: string): RsaPrivateKey =
+  ## Constructs an RSA private key from its string representation.
   let privateKey = rsa_private_key_from_bytes(cstring(s), csize_t(s.len))
   result = RsaPrivateKey(key: privateKey)
 
 proc toAesKey*(s: string): AesKey =
+  ## Constructs an AES key from its string representation.
   let key = aes_key_from(cstring(s), csize_t(s.len))
   result = AesKey(key: key)
 
 proc newRsaKeyPairSync*(): (RsaPublicKey, RsaPrivateKey) =
+  ## Generates a new RSA key pair.
   let keys = rsa_key_pair_new()
   if keys == nil:
     raise newException(OpenSSLError, "Failed generating RSA key pair, OpenSSL error: " & $get_openssl_error())
@@ -936,6 +958,7 @@ proc newRsaKeyPairSync*(): (RsaPublicKey, RsaPrivateKey) =
   rsa_key_pair_free_wrapper(keys)
 
 proc rsaEncryptSync*(publicKey: RsaPublicKey, plaintext: string): string =
+  ## Performs an RSA encryption.
   let key = cast[ptr rsa_public_key_t](publicKey.key)
   let ciphertext = rsa_encrypt(key, addr plaintext[0], csize_t(plaintext.len))
   if ciphertext == nil:
@@ -946,6 +969,7 @@ proc rsaEncryptSync*(publicKey: RsaPublicKey, plaintext: string): string =
   crypto_data_free(ciphertext)
 
 proc rsaDecryptSync*(privateKey: RsaPrivateKey, ciphertext: string): string =
+  ## Performs an RSA decryption.
   let key = cast[ptr rsa_private_key_t](privateKey.key)
   let plaintext = rsa_decrypt(key, addr ciphertext[0], csize_t(ciphertext.len))
   if plaintext == nil:
@@ -956,12 +980,14 @@ proc rsaDecryptSync*(privateKey: RsaPrivateKey, ciphertext: string): string =
   crypto_data_free(plaintext)
 
 proc newAesKeySync*(): AesKey =
+  ## Generates a new AES key.
   let key = aes_key_new()
   if key == nil:
     raise newException(OpenSSLError, "Failed generating AES key, OpenSSL error: " & $get_openssl_error())
   result = AesKey(key: key)
 
 proc aesEncryptSync*(key: AesKey, plaintext: string): string =
+  ## Performs an AES encryption.
   let key = cast[ptr aes_key_t](key.key)
   let ciphertext = aes_encrypt(key, addr plaintext[0], csize_t(plaintext.len))
   if ciphertext == nil:
@@ -972,6 +998,7 @@ proc aesEncryptSync*(key: AesKey, plaintext: string): string =
   crypto_data_free(ciphertext)
 
 proc aesDecryptSync*(key: AesKey, ciphertext: string): string =
+  ## Performs an AES decryption.
   let key = cast[ptr aes_key_t](key.key)
   let plaintext = aes_decrypt(key, addr ciphertext[0], csize_t(ciphertext.len))
   if plaintext == nil:
@@ -980,6 +1007,10 @@ proc aesDecryptSync*(key: AesKey, ciphertext: string): string =
   copyMem(addr plaintextStr[0], plaintext.data, plaintext.data_size)
   result = plaintextStr
   crypto_data_free(plaintext)
+
+##################################################################
+# Asynchronous wrapper around the high level synchronous wrapper #
+##################################################################
 
 # I wish this worked. The idea is to wrap the heavily synchronous crypto
 # operations in futures to make them asynchronous. Under the hood, this means
